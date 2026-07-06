@@ -51,7 +51,7 @@ citations should be reviewed each January when FMCSA publishes the annual notice
 | CSV | PapaParse |
 | PDF | jsPDF |
 | Tests | Vitest |
-| Data | Browser `localStorage` behind a `DataLayer` interface — drop in Supabase later |
+| Data | Supabase Postgres (or `localStorage` when env vars are absent, for local dev) |
 
 ## Palette (extracted from the "Know Before You Go" logo)
 
@@ -64,13 +64,78 @@ citations should be reviewed each January when FMCSA publishes the annual notice
 
 ```bash
 npm install
-npm run dev          # http://localhost:3000
-npm test             # Vitest unit tests for selection math
-npm run typecheck    # strict TypeScript check
-npm run build        # production build
+cp .env.example .env.local   # fill in Supabase URL + anon key (or leave empty)
+npm run dev                  # http://localhost:3000
+npm test                     # Vitest unit tests for selection math
+npm run typecheck            # strict TypeScript check
+npm run build                # production build
 ```
 
-Deploy with `vercel deploy` — no environment variables required for v1.
+Without env vars set, the app runs in `local` backend mode (browser `localStorage`) —
+ideal for a quick tour. With `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+set, it switches to Supabase automatically. The current backend is shown as a chip on
+every page.
+
+## Deploying to Vercel
+
+### 1. Create the Supabase project (~60 seconds)
+
+- Go to <https://supabase.com/dashboard> → **New project**.
+- Name: `know-before-you-go` · Region: **East US (N. Virginia)** · pick a strong DB password.
+- Wait for the project to finish provisioning (~1 min).
+
+### 2. Apply the migration
+
+Open **SQL Editor → New query** in the Supabase dashboard, paste the entire
+contents of `supabase/migrations/20260706000000_init.sql`, and run it. It creates
+three tables (`companies`, `drivers`, `draws`) with RLS enabled, triggers that
+make the `draws` table immutable, and the v1 anon-access policies.
+
+Prefer the CLI? `supabase link --project-ref YOUR-REF && supabase db push` also works.
+
+### 3. Grab the two keys
+
+Supabase → **Settings → API**:
+
+- **Project URL** → this is `NEXT_PUBLIC_SUPABASE_URL`
+- **Project API keys → `anon` `public`** → this is `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+### 4. Import the repo on Vercel
+
+- Vercel → **New Project → Import Git Repository** → pick this repo.
+- Framework Preset: **Next.js** (auto-detected).
+- **Environment Variables** → add the two above for Production, Preview, and Development.
+
+### 5. Deploy and verify
+
+Vercel deploys automatically. On the live URL, confirm the header chip on the
+dashboard reads `backend: supabase` (not `local`). Upload the roster template
+from `samples/roster_template.csv` as a smoke test — the drivers should persist
+across a page refresh.
+
+Region pin: `iad1` (Vercel) ↔ `us-east-1` (Supabase) for minimum latency.
+
+The included `vercel.json` sets basic security headers (`X-Frame-Options: DENY`,
+`Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` disabling
+camera/mic/geo) and pins the region.
+
+## Security
+
+This is scaffolded as an **internal, unauthenticated** tool for v1: the Supabase anon
+key policies allow full CRUD from any client that has the key.
+
+Before real DOT PII lands in this deployment:
+
+- Add Supabase Auth (magic-link email) and require a signed-in session on every page.
+- Replace the anon policies in the migration with per-user / per-org policies that
+  check `auth.uid()` and a `memberships` table.
+- Rotate the anon key and lock the Vercel URL behind Vercel Password Protection or
+  your SSO.
+- Consider moving the `service_role` key server-side and mediating mutations through
+  Next.js Route Handlers.
+
+The migration ships with the anon policies clearly labeled `SECURITY NOTE` and RLS
+already enabled, so tightening is an edit-in-place operation, not a re-architecture.
 
 ## Repository layout
 

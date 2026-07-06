@@ -9,24 +9,45 @@ import type { AuditStore, DrawRecord } from "@/lib/types";
 
 export default function AuditPage() {
   const [store, setStore] = useState<AuditStore>({ companies: [], draws: [] });
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setStore(dataLayer.load());
+    (async () => {
+      try {
+        setStore(await dataLayer.loadStore());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
   }, []);
 
   return (
     <div className="min-h-screen">
       <Header />
       <main className="mx-auto max-w-6xl px-6 py-8">
-        <div className="mb-6">
-          <h1 className="font-serif text-3xl">
-            <span className="text-white">Audit </span>
-            <span className="gold-text italic">trail</span>
-          </h1>
-          <p className="mt-1 text-sm text-ink-300">
-            Every draw, with seed, pool hash, and full selection roster.
-          </p>
+        <div className="mb-6 flex items-end justify-between gap-4">
+          <div>
+            <h1 className="font-serif text-3xl">
+              <span className="text-white">Audit </span>
+              <span className="gold-text italic">trail</span>
+            </h1>
+            <p className="mt-1 text-sm text-ink-300">
+              Every draw, with seed, pool hash, and full selection roster.
+            </p>
+          </div>
+          <span className="chip">
+            backend:{" "}
+            <span className="ml-1 font-mono text-ink-200">
+              {dataLayer.backendLabel}
+            </span>
+          </span>
         </div>
+
+        {error && (
+          <div className="mb-4 rounded-lg border border-status-bad/40 bg-status-bad/10 p-4 text-sm text-status-bad">
+            {error}
+          </div>
+        )}
 
         <div className="panel">
           <div className="panel-header">

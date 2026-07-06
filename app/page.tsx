@@ -28,10 +28,22 @@ export default function DashboardPage() {
   const [lastDraw, setLastDraw] = useState<DrawRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const next = await dataLayer.loadStore();
+      setStore(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   useEffect(() => {
-    setStore(dataLayer.load());
-    setHydrated(true);
+    (async () => {
+      await refresh();
+      setHydrated(true);
+    })();
   }, []);
 
   const activeCompany: Company | null = useMemo(() => {
@@ -65,40 +77,62 @@ export default function DashboardPage() {
     );
   }, [selectedId, activePoolSize, store.draws]);
 
-  const addCompany = () => {
+  const addCompany = async () => {
     const name = window.prompt("New company name:");
     if (!name || !name.trim()) return;
-    dataLayer.addCompany(name);
-    const next = dataLayer.load();
-    setStore(next);
-    const created = next.companies.find(
-      (c) => c.name.toLowerCase() === name.trim().toLowerCase(),
-    );
-    if (created) setSelectedId(created.id);
-  };
-
-  const importDrivers = (drivers: Driver[]) => {
-    let company = activeCompany;
-    if (!company) {
-      const inferred = drivers[0]?.company || "Imported Roster";
-      company = dataLayer.addCompany(inferred);
-      setSelectedId(company.id);
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await dataLayer.addCompany(name);
+      await refresh();
+      setSelectedId(created.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
-    const existing = new Map(company.drivers.map((d) => [d.driverId, d]));
-    for (const d of drivers) existing.set(d.driverId, { ...d, company: company.name });
-    const merged = Array.from(existing.values());
-    dataLayer.updateCompanyDrivers(company.id, merged);
-    setStore(dataLayer.load());
   };
 
-  const removeDriver = (driverId: string) => {
+  const importDrivers = async (drivers: Driver[]) => {
+    setBusy(true);
+    setError(null);
+    try {
+      let company = activeCompany;
+      if (!company) {
+        const inferred = drivers[0]?.company || "Imported Roster";
+        company = await dataLayer.addCompany(inferred);
+        setSelectedId(company.id);
+      }
+      const existing = new Map(company.drivers.map((d) => [d.driverId, d]));
+      for (const d of drivers)
+        existing.set(d.driverId, { ...d, company: company.name });
+      const merged = Array.from(existing.values());
+      await dataLayer.setCompanyDrivers(company.id, merged);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeDriver = async (driverId: string) => {
     if (!activeCompany) return;
-    const next = activeCompany.drivers.filter((d) => d.driverId !== driverId);
-    dataLayer.updateCompanyDrivers(activeCompany.id, next);
-    setStore(dataLayer.load());
+    setBusy(true);
+    setError(null);
+    try {
+      const next = activeCompany.drivers.filter((d) => d.driverId !== driverId);
+      await dataLayer.setCompanyDrivers(activeCompany.id, next);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const onDraw = async (v: DrawFormValue) => {
+    setBusy(true);
     setError(null);
     try {
       if (pool.filter((d) => d.status === "active").length === 0) {
@@ -131,11 +165,13 @@ export default function DashboardPage() {
           citation: FMCSA_RATES.citation,
         },
       };
-      dataLayer.addDraw(record);
-      setStore(dataLayer.load());
+      await dataLayer.addDraw(record);
+      await refresh();
       setLastDraw(record);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -143,14 +179,17 @@ export default function DashboardPage() {
     <div className="min-h-screen">
       <Header />
       <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-6">
-          <h1 className="font-serif text-3xl">
-            <span className="text-white">Random selection </span>
-            <span className="gold-text italic">generator</span>
-          </h1>
-          <p className="mt-1 text-sm text-ink-300">
-            {FMCSA_RATES.notes}
-          </p>
+        <div className="mb-6 flex items-end justify-between gap-4">
+          <div>
+            <h1 className="font-serif text-3xl">
+              <span className="text-white">Random selection </span>
+              <span className="gold-text italic">generator</span>
+            </h1>
+            <p className="mt-1 text-sm text-ink-300">{FMCSA_RATES.notes}</p>
+          </div>
+          <span className="chip">
+            backend: <span className="ml-1 font-mono text-ink-200">{dataLayer.backendLabel}</span>
+          </span>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
@@ -203,7 +242,7 @@ export default function DashboardPage() {
               companies={store.companies}
               activeCompanyId={selectedId}
               poolSize={activePoolSize}
-              disabled={activePoolSize === 0}
+              disabled={activePoolSize === 0 || busy}
               onSubmit={onDraw}
             />
 
